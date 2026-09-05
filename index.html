@@ -3,6 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
     <title>Roblox Model Viewer</title>
     <style>
         body {
@@ -14,19 +15,14 @@
 </head>
 
 <body>
-    <!-- Three.js Libraries -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/EXRLoader.js"></script>
-    
-    <!-- lil-gui (สำหรับแผงควบคุมแสงมุมขวาบน) -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/DragControls.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/lil-gui@0.18"></script>
 
     <script>
-        // =========================
-        // Renderer
-        // =========================
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.shadowMap.enabled = true;
@@ -34,152 +30,302 @@
         renderer.outputEncoding = THREE.sRGBEncoding;
         document.body.appendChild(renderer.domElement);
 
-        // =========================
-        // Scene & Camera
-        // =========================
         const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+        const camera = new THREE.PerspectiveCamera (75, window.innerWidth / window.innerHeight, 0.1, 1000);
         camera.position.set(0, 3, 6);
 
-        // =========================
-        // Controls (เมาส์สำหรับหมุน/ซูมกล้องอย่างเดียว)
-        // =========================
-        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        const controls = new THREE.OrbitControls(
+            camera,
+            renderer.domElement
+        );
         controls.enableDamping = true;
         controls.dampingFactor = 0.05;
-
-        // =========================
-        // Lighting
-        // =========================
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+        controls.target.set(0, 2, 0);
+        const ambientLight = new THREE.AmbientLight(0x404040, 1);
         scene.add(ambientLight);
 
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        const directionalLight = new THREE.DirectionalLight (
+            0xffffff,0.5
+        );
         directionalLight.position.set(5, 10, 5);
         directionalLight.castShadow = true;
-        directionalLight.shadow.mapSize.width = 1024;
-        directionalLight.shadow.mapSize.height = 1024;
+
+        directionalLight.shadow.mapSize.set(1024, 1024);
+        directionalLight.shadow.camera.left = -20;
+        directionalLight.shadow.camera.right = 20;
+        directionalLight.shadow.camera.top = 20;
+        directionalLight.shadow.camera.bottom = -20;
+
         scene.add(directionalLight);
 
-        // =========================
         // EXR Skybox
-        // =========================
-        const exrSkyboxUrl = 'https://dl.polyhaven.org/file/ph-assets/HDRIs/exr/1k/venice_sunset_1k.exr';
-        const pmremGenerator = new THREE.PMREMGenerator(renderer);
-        pmremGenerator.compileEquirectangularShader();
+        const exrUrl = 'https://dl.polyhaven.org/file/ph-assets/HDRIs/exr/1k/urban_street_01_1k.exr';
 
-        new THREE.EXRLoader()
-            .setDataType(THREE.UnsignedByteType)
-            .load(
-                exrSkyboxUrl,
-                (texture) => {
-                    const skybox = pmremGenerator.fromEquirectangular(texture).texture;
-                    scene.background = skybox;
-                    scene.environment = skybox;
-                    texture.dispose();
-                    pmremGenerator.dispose();
-                },
+        const pmrem = new THREE.PMREMGenerator(renderer);
+        pmrem.compileEquirectangularShader();
+
+        new THREE.EXRLoader().setDataType(THREE.UnsignedByteType).load(exrUrl, (texture) => {
+                const env = pmrem.fromEquirectangular(texture).texture;
+                scene.background = env;
+                scene.environment = env;
+                texture.dispose();
+                pmrem.dispose();
+            },
                 undefined,
                 (error) => {
-                    console.error('Unable to load EXR skybox:', error);
+                    console.error(
+                        'Unable to load EXR:',
+                        error
+                    );
                 }
-            );
-
-        // =========================
+        );
         // Floor
-        // =========================
-        const texFloor = new THREE.TextureLoader().load('https://sibsansuk.github.io/mossy_cobblestone_diff_1k.jpg');
-        texFloor.encoding = THREE.sRGBEncoding;
+        const floorTex = new THREE.TextureLoader().load ('https://sibsansuk.github.io/mossy_cobblestone_diff_1k.jpg');
+        floorTex.encoding = THREE.sRGBEncoding;
 
-        const matFloor = new THREE.MeshStandardMaterial({
-            map: texFloor,
-            side: THREE.DoubleSide
-        });
-
-        const planeGeometry = new THREE.PlaneGeometry(20, 20);
-        const plane = new THREE.Mesh(planeGeometry, matFloor);
-        plane.rotation.x = -Math.PI / 2;
-        plane.receiveShadow = true;
-        scene.add(plane);
-
-        // =========================
-        // Load GLB Model & Snap Foot to Floor
-        // =========================
+        const floor = new THREE.Mesh(
+            new THREE.PlaneGeometry(20, 20),
+            new THREE.MeshStandardMaterial({
+                map: floorTex,
+                side: THREE.DoubleSide,
+                roughness: 0.9,
+                metalness: 0
+            })
+        );
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = true;
+        scene.add(floor);
+        // Models
         let characterModel = null;
-        const gltfLoader = new THREE.GLTFLoader();
+        const loader = new THREE.GLTFLoader();
+        function setupModel(model) {
+            model.traverse((child) => {
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
 
-        gltfLoader.load(
-            'https://wiphadathabpia.github.io/Wiphada-Mydog.github.io/roblox.glb',
-            (gltf) => {
-                characterModel = gltf.scene;
+                    if (child.material) {
+                        child.material.roughness = 0.7;
+                        child.material.metalness = 0.0;
 
-                // เปิด Shadow และตั้งค่า Texture Encoding
-                characterModel.traverse((child) => {
-                    if (child.isMesh) {
-                        child.castShadow = true;
-                        child.receiveShadow = true;
-                        if (child.material && child.material.map) {
+                        if (child.material.map) {
                             child.material.map.encoding = THREE.sRGBEncoding;
                         }
                     }
-                });
+                }
+            });
+        }
+        // Roblox
+        loader.load(
+            'https://wiphadathabpia.github.io/Wiphada-Mydog.github.io/roblox.glb',
+            (gltf) => {
+                characterModel = gltf.scene;
+                setupModel(characterModel);
 
-                // --- คำนวณ Bounding Box เพื่อยกโมเดลขึ้นมาให้เท้าอยู่บนพื้น (Y = 0) พอดี ---
                 const box = new THREE.Box3().setFromObject(characterModel);
-                const minY = box.min.y;
-                characterModel.position.y = -minY;
+
+                characterModel.position.y = -box.min.y;
+                characterModel.rotation.y = Math.PI;
 
                 scene.add(characterModel);
                 console.log('โหลดตัวละครสำเร็จ');
             },
             (xhr) => {
                 if (xhr.total) {
-                    console.log('Loading: ' + (xhr.loaded / xhr.total * 100).toFixed(2) + '%');
+                    console.log(
+                        'Loading Roblox: ' + (xhr.loaded / xhr.total * 100).toFixed(2) + '%'
+                    );
                 }
             },
             (error) => {
-                console.error('โหลดตัวละครไม่สำเร็จ:', error);
+                console.error(
+                    'โหลดตัวละครไม่สำเร็จ:',
+                    error
+                );
             }
         );
+        // House
+        loader.load(
+            'https://wiphadathabpia.github.io/Wiphada-Mydog.github.io/house.glb',
+            (gltf) => {
+                const house = gltf.scene;
+                setupModel(house);
 
-        // =========================
-        // GUI Controls (ปรับตำแหน่งและค่าของแสง)
-        // =========================
-        const gui = new lil.GUI({ title: 'ปรับแต่งแสง' });
+                house.position.set(-5, 0, -5.5);
+                house.rotation.y = Math.PI;
+                house.scale.set(3.5, 3.5, 3.5);
 
-        // แผงควบคุม Directional Light
-        const lightFolder = gui.addFolder('Directional Light');
-        lightFolder.add(directionalLight.position, 'x', -15, 15, 0.1).name('Position X');
-        lightFolder.add(directionalLight.position, 'y', 1, 20, 0.1).name('Position Y');
-        lightFolder.add(directionalLight.position, 'z', -15, 15, 0.1).name('Position Z');
-        lightFolder.add(directionalLight, 'intensity', 0, 5, 0.1).name('Intensity');
-        lightFolder.addColor({ color: '#ffffff' }, 'color').name('Color').onChange((val) => {
-            directionalLight.color.set(val);
+                const box = new THREE.Box3().setFromObject(house);
+
+                house.position.y -= box.min.y;
+
+                scene.add(house);
+                console.log('โหลดบ้านสำเร็จ');
+            },
+            (xhr) => {
+                if (xhr.total) {
+                    console.log(
+                        'Loading House: ' + (xhr.loaded / xhr.total * 100).toFixed(2) + '%'
+                    );
+                }
+            },
+            (error) => {
+                console.error(
+                    'โหลดบ้านไม่สำเร็จ:',
+                    error
+                );
+            }
+        );
+        // Swing
+        loader.load(
+            'https://wiphadathabpia.github.io/Wiphada-Mydog.github.io/swing.glb',
+            (gltf) => {
+                const swing = gltf.scene;
+                setupModel(swing);
+
+                swing.position.set(6, 0, -4);
+                swing.rotation.y = Math.PI;
+                swing.scale.set(0.5, 0.5, 0.5);
+
+                const box = new THREE.Box3().setFromObject(swing);
+
+                swing.position.y -= box.min.y;
+
+                scene.add(swing);
+                console.log('โหลดชิงช้าสำเร็จ');
+            },
+            (xhr) => {
+                if (xhr.total) {
+                    console.log(
+                        'Loading Swing: ' + (xhr.loaded / xhr.total * 100).toFixed(2) + '%'
+                    );
+                }
+            },
+            (error) => {
+                console.error(
+                    'โหลดชิงช้าไม่สำเร็จ:', error
+                );
+            }
+        );
+        // Light Drag
+        const lightHelper = new THREE.Mesh(
+            new THREE.SphereGeometry(0.2, 16, 16),
+            new THREE.MeshBasicMaterial({
+                color: 0xffea00,
+                wireframe: true
+            })
+        );
+        lightHelper.position.copy(
+            directionalLight.position
+        );
+        scene.add(lightHelper);
+
+        const dragControls = new THREE.DragControls(
+            [lightHelper],
+            camera,
+            renderer.domElement
+        );
+        dragControls.addEventListener ('dragstart', () => {
+                controls.enabled = false;
+            }
+        );
+        dragControls.addEventListener ('drag', (event) => {
+                directionalLight.position.copy(
+                    event.object.position
+                );
+            }
+        );
+        dragControls.addEventListener ('dragend', () => {
+                controls.enabled = true;
+            }
+        );
+        // GUI
+        const gui = new lil.GUI({
+            title: '⚙️ Controls'
         });
+        // PBR Controller
+        const lightFolder = gui.addFolder (
+            'PBR Controller'
+        );
+        lightFolder
+            .add(directionalLight.position, 'x', -15, 15, 0.1)
+            .name('Position X')
+            .listen();
+        lightFolder
+            .add(directionalLight.position, 'y', 1, 20, 0.1)
+            .name('Position Y')
+            .listen();
+        lightFolder
+            .add(directionalLight.position, 'z', -15, 15, 0.1)
+            .name('Position Z')
+            .listen();
+        lightFolder
+            .add(directionalLight, 'intensity', 0, 5, 0.1)
+            .name('Intensity');
 
-        // แผงควบคุม Ambient Light
-        const ambientFolder = gui.addFolder('Ambient Light');
-        ambientFolder.add(ambientLight, 'intensity', 0, 3, 0.1).name('Intensity');
+        // Character Material
+        const robloxMaterial = {
+            baseColor: '#ffffff',
+            metallic: 0,
+            roughness: 0.7
+        };
+        const materialFolder = gui.addFolder(
+            'Character Material'
+        );
+        function updateCharacter(callback) {
+            if (!characterModel) return;
 
-        // =========================
-        // Animation Loop
-        // =========================
+            characterModel.traverse((child) => {
+                if (child.isMesh && child.material) {
+                    callback(child.material);
+                }
+            });
+        }
+        materialFolder
+            .addColor(robloxMaterial, 'baseColor')
+            .name('Base Color')
+            .onChange((value) => {
+                updateCharacter((material) => {
+                    material.color.set(value);
+                    material.needsUpdate = true;
+                });
+            });
+        materialFolder
+            .add(robloxMaterial, 'metallic', 0, 1, 0.01)
+            .name('Metallic')
+            .onChange((value) => {
+                updateCharacter((material) => {
+                    material.metalness = value;
+                    material.needsUpdate = true;
+                });
+            });
+        materialFolder
+            .add(robloxMaterial, 'roughness', 0, 1, 0.01)
+            .name('Roughness')
+            .onChange((value) => {
+                updateCharacter((material) => {
+                    material.roughness = value;
+                    material.needsUpdate = true;
+                });
+            });
+        // Animation
         function animate() {
             requestAnimationFrame(animate);
             controls.update();
             renderer.render(scene, camera);
         }
         animate();
-
-        // =========================
-        // Window Resize Handler
-        // =========================
+        // Resize
         window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.aspect =
+                window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setSize(
+                window.innerWidth,
+                window.innerHeight
+            );
         });
     </script>
 </body>
-
 </html>
